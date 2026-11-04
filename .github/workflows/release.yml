@@ -1,0 +1,68 @@
+# Builds and publishes a release when a version tag (v1.2.3) is pushed,
+# or manually: Actions → Release → Run workflow, entering an existing tag.
+# The release gets the two files the in-app updater needs:
+#   SmartPassword.exe         self-contained single-file build for Windows x64
+#   SmartPassword.exe.sha256  its SHA-256, checked by the app before it installs the update
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release, e.g. v1.0.0'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Read version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $version = $env:TAG.TrimStart('v')
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Tag must look like v1.2.3, got $env:TAG" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Test
+        run: dotnet test -c Release
+
+      - name: Publish
+        run: >
+          dotnet publish src/SmartPassword.App -c Release -r win-x64 --self-contained
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:Version=${{ steps.version.outputs.version }}
+          -o publish
+
+      - name: Hash
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash publish/SmartPassword.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  SmartPassword.exe" | Out-File -Encoding ascii -NoNewline publish/SmartPassword.exe.sha256
+          "SHA-256: $hash"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: >
+          gh release create '${{ env.TAG }}'
+          publish/SmartPassword.exe publish/SmartPassword.exe.sha256
+          --title 'SmartPassword ${{ steps.version.outputs.version }}'
+          --notes-file docs/release-notes.md
