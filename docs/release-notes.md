@@ -1,3 +1,7 @@
+## What's new in 1.0.1
+
+- First release delivered through the built-in updater. There are no functional changes since 1.0.0.
+
 ## Installation
 
 1. Download **SmartPassword.exe** below.
